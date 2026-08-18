@@ -42,28 +42,39 @@ wx.config({ ...data, jsApiList: ['openLocation'] });
 
 ## 部署（阿里云轻量 / ECS）
 
+脚本自动适配 Alpine（OpenRC）和 Debian/Ubuntu/CentOS（systemd）：
+
 ```bash
 git clone <你的仓库> /opt/wx-auth && cd /opt/wx-auth
-sudo bash deploy/bootstrap.sh          # 装 Node + 建用户 + 装依赖 + 装 systemd 服务
+sudo sh deploy/bootstrap.sh            # 装 Node + 建用户 + 装依赖 + 装服务
 sudo vi /opt/wx-auth/.env              # 填 WX_APP_ID / WX_APP_SECRET / ALLOWED_HOSTS
-sudo systemctl start wx-auth
-curl http://127.0.0.1:3000/healthz
 ```
 
-更新代码：`cd /opt/wx-auth && git pull && npm install --omit=dev && sudo systemctl restart wx-auth`
+启动、看状态、看日志：
 
-日志：`journalctl -u wx-auth -f`（JSON 一行一条）
+| | Alpine（OpenRC） | systemd |
+| --- | --- | --- |
+| 启动 | `rc-service wx-auth start` | `systemctl start wx-auth` |
+| 重启 | `rc-service wx-auth restart` | `systemctl restart wx-auth` |
+| 状态 | `rc-service wx-auth status` | `systemctl status wx-auth` |
+| 日志 | `tail -f /var/log/wx-auth.log` | `journalctl -u wx-auth -f` |
+
+验证：`curl http://127.0.0.1:3000/healthz`
+
+更新代码：`cd /opt/wx-auth && git pull && npm install --omit=dev && sudo rc-service wx-auth restart`（systemd 换成 `systemctl restart wx-auth`）
 
 服务默认只监听 `127.0.0.1:3000`，自己用 Nginx 反代到它并配好 https 即可（`TRUST_PROXY=loopback` 已适配本机反代，用于限流取真实 IP）。
 
+Alpine 注意两点：Node 必须用 apk 装的 musl 版本（官方 glibc 二进制跑不起来，脚本已处理）；日志走文件，量很小（只记启动、凭证刷新和错误），要轮转就 `apk add logrotate` 后加一份 `/etc/logrotate.d/wx-auth`。
+
 ## 为什么不会挂
 
-- systemd `Restart=always` + `RestartSec=2`，进程退出 2 秒内拉起，开机自启；配置写错（退出码 78）才停下来，不会无脑重启刷日志
-- 未捕获异常 / 未处理 Promise 拒绝主动退出交给 systemd，不带着不确定状态继续服务
+- 进程退出 2 秒内自动拉起、开机自启：systemd 用 `Restart=always`，Alpine 用 `supervise-daemon`；5 分钟内重启超过 20 次才放弃，避免配置写错时无限刷日志
+- 未捕获异常 / 未处理 Promise 拒绝主动退出，交给 init 拉起，不带着不确定状态继续服务
 - 启动即预热凭证，之后每 30 分钟后台刷新，签名请求走内存缓存，不在请求链路里等微信接口
 - 微信接口故障时，只要手上的 ticket 还没真正过期就继续用（凭证提前 5 分钟视为过期，留出降级空间）
 - 凭证落盘 `.cache/`，重启不用重新换 token
-- `MemoryMax=256M` + `--max-old-space-size=192`，避免小内存机器上被 OOM killer 挑中
+- 限制 V8 堆 192M，避免小内存机器上被 OOM killer 挑中
 
 ## 配置
 

@@ -1,0 +1,38 @@
+#!/sbin/openrc-run
+# Alpine / OpenRC 服务定义。supervise-daemon 负责进程退出后自动拉起。
+# 环境变量不在这里注入，node 启动后由 dotenv 读取 /opt/wx-auth/.env。
+
+name="wx-auth"
+description="WeChat JS-SDK signature service"
+
+app_dir="/opt/wx-auth"
+command="/usr/bin/node"
+command_args="$app_dir/src/server.js"
+command_user="wxauth:wxauth"
+directory="$app_dir"
+
+supervisor="supervise-daemon"
+# 崩了 2 秒后拉起；5 分钟内超过 20 次就放弃，避免配置写错时无限刷日志
+respawn_delay=2
+respawn_max=20
+respawn_period=300
+
+output_log="/var/log/wx-auth.log"
+error_log="/var/log/wx-auth.log"
+
+# 小内存机器限制 V8 堆，避免被内核 OOM killer 干掉
+export NODE_OPTIONS="--max-old-space-size=192"
+
+depend() {
+	need net
+	after firewall
+}
+
+start_pre() {
+	if [ ! -f "$app_dir/.env" ]; then
+		eerror "缺少 $app_dir/.env"
+		return 1
+	fi
+	checkpath -d -m 0750 -o wxauth:wxauth "$app_dir/.cache"
+	checkpath -f -m 0640 -o wxauth:wxauth "$output_log"
+}
