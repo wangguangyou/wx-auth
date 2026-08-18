@@ -1,0 +1,29 @@
+[Unit]
+Description=wx-auth - WeChat JS-SDK signature service
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+WorkingDirectory=/opt/wx-auth
+EnvironmentFile=/opt/wx-auth/.env
+# 内存小的机器限制 V8 堆，避免被内核 OOM killer 干掉
+Environment=NODE_OPTIONS=--max-old-space-size=192
+ExecStart=/usr/local/bin/node /opt/wx-auth/src/server.js
+User=wxauth
+Group=wxauth
+
+# 崩了就无限重启；仅配置错误（退出码 78）不重启，避免刷日志
+Restart=always
+RestartSec=2
+RestartPreventExitStatus=78
+
+SyslogIdentifier=wx-auth
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/wx-auth/.cache
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target
